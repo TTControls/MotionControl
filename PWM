@@ -1,0 +1,11 @@
+//Duty Cycle
+//Duty cycle time loop
+if Z[i].bEn and not Z[i].tDutyCycle.DN then
+	Z[i].tDutyCycle.TimerEnable	:= 1;
+	Z[i].tDutyCycle.Reset 		:= 0;
+else
+	Z[i].tDutyCycle.TimerEnable	:= 0;
+	Z[i].tDutyCycle.Reset 		:= 1;
+end_if;
+//Pulses the output					
+Z[i].bPWM := Z[i].tDutyCycle.ACC < Z[i].tDutyCycle.PRE*(Z[i].rCV/100);
