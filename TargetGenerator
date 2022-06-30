@@ -1,0 +1,17 @@
+//Target generator and output control
+//This keeps the universe from collapse. (dx/0)
+if MC.rRampRate = 0 then
+	MC.rRampRate := .01;
+end_if;
+
+//Time functions.
+//Ramp time (units/second) for units/min (*60000) for units/hour (*3600000)
+tonr(MC.tTimeRamp);
+MC.tTimeRamp.PRE := abs(MC.rSP-MC.rPVInit)/MC.rRampRate*1000;
+//Discrete time between measurements
+tonr(MC.tTimeDerivative);
+MC.tTimeDerivative.PRE := MC.rTimeDerivative*1000;
+
+//Target generators. The first one is linear the second is s-curve. (switch comment to select)
+//rTargetGenerator := rPVInit+(rSP-rPVInit)*(tTimeRamp.ACC/tTimeRamp.PRE);
+MC.rTargetGenerator := MC.rPVInit+(MC.rSP-MC.rPVInit)*(((-2*((MC.tTimeRamp.ACC/MC.tTimeRamp.PRE)**3))+(3*((MC.tTimeRamp.ACC/MC.tTimeRamp.PRE)**2))));
