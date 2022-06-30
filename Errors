@@ -1,0 +1,3 @@
+//Tolerances.
+MC.bAtSP := ABS((MC.rPV-MC.rSP)/MC.rSP*100) <= MC.rSPTol;
+MC.bFollowingError := ABS(MC.rError[0]) > MC.rTargetTol and MC.bEn;
