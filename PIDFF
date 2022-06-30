@@ -1,0 +1,45 @@
+//Output control 
+if MC.bEn and MC.rSPInit = MC.rSP then
+	MC.tTimeRamp.TimerEnable := 1;
+	MC.tTimeRamp.Reset := 0;
+	if not MC.tTimeDerivative.DN then
+		MC.tTimeDerivative.TimerEnable := 1;
+		MC.tTimeDerivative.Reset := 0;
+	else
+		MC.rError[2] := MC.rError[1];
+		MC.rError[1] := MC.rError[0];
+		MC.rTarget[1] := MC.rTarget[0];
+		MC.rTarget[0] := MC.rTargetGenerator;
+		MC.rTargetVelocity[1] := MC.rTargetVelocity[0];
+		MC.rTargetVelocity[0] := (MC.rTarget[1]-MC.rTarget[0])*1000/MC.tTimeDerivative.PRE;
+		MC.rTargetAcceleration[1] := MC.rTargetAcceleration[0];
+		MC.rTargetAcceleration[0] := (MC.rTargetVelocity[1]-MC.rTarget[0])*1000/MC.tTimeDerivative.PRE;
+		MC.rTargetJerk := (MC.rTargetAcceleration[1]-MC.rTargetAcceleration[0])*1000/MC.tTimeDerivative.PRE;
+		MC.rCVEMA[1] := MC.rCVEMA[0];
+		MC.rPTerm := MC.rPGain*(MC.rError[0]-MC.rError[1]);
+		MC.rITerm := MC.rIGain*MC.rError[0]*MC.rTimeDerivative;
+		MC.rDTerm := MC.rDGain*(MC.rError[0]-2*MC.rError[1]+MC.rError[2])/MC.rTimeDerivative**2;
+		MC.rFFVTerm := MC.rFFVGain*MC.rTargetVelocity[0];
+		MC.rFFATerm := MC.rFFAGain*MC.rTargetAcceleration[0];
+		MC.rFFJTerm := MC.rFFJGain*MC.rTargetJerk;
+		MC.rCV := MC.rCV+MC.rPTerm+MC.rITerm+MC.rDTerm+MC.rFFVTerm+MC.rFFATerm+MC.rFFJTerm;
+		MC.rCVEMA[0] := MC.rCVAlpha*MC.rCV+(1-MC.rCVAlpha)*MC.rCVEMA[1];
+			if MC.rCV < MC.rCVMin then
+				MC.rCV := MC.rCVMin;
+			elsif MC.rCV >= MC.rCVMax then
+				MC.rCV := MC.rCVMax;
+			end_if;
+		end_if;
+		MC.tTimeDerivative.TimerEnable := 0;
+		MC.tTimeDerivative.Reset := 1;
+	end_if;
+else
+	MC.rCV := 0;
+	MC.rCVEMA[0] := 0;
+	MC.rSPInit := MC.rSP;
+	MC.rPVInit := MC.rPV;
+	MC.tTimeRamp.TimerEnable := 0;
+	MC.tTimeRamp.Reset := 1;
+	MC.tTimeDerivative.TimerEnable := 0;
+	MC.tTimeDerivative.Reset := 1;
+end_if;
