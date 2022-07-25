@@ -1,0 +1,168 @@
+//This keeps a denomenator from being zero.
+//(keeps the universe from collapse)
+if BucketAxis0MC.rRate = 0 then
+	BucketAxis0MC.rRate := .01;
+end_if;
+if BucketAxis1MC.rRate = 0 then
+	BucketAxis1MC.rRate := .01;
+end_if;
+
+//Get average position between Axis
+BucketRefAxis.rAvg := BucketAxis0MC.rPV+BucketAxis1MC.rPV/2;
+
+//Setpoint control
+if ABS(BucketAxis0MC.rPV-BucketAxis1MC.rPV) > MixerBucket.rPosSkew then
+	//Set average as both axes setpoints.
+	BucketAxis0MC.rSP := BucketRefAxis.rAvg;
+	BucketAxis1MC.rSP := BucketRefAxis.rAvg;
+	BucketAxis0MC.rRate := 5;
+	BucketAxis1MC.rRate := 5;
+else
+	//Move
+	BucketAxis0MC.rSP := BucketRefAxis.rSP;
+	BucketAxis1MC.rSP := BucketRefAxis.rSP;
+	BucketAxis0MC.rRate := BucketRefAxis.rRate;
+	BucketAxis1MC.rRate := BucketRefAxis.rRate;
+	//For gearing
+	BucketRefAxis.rAvgInit := BucketRefAxis.rAvg;
+end_if;
+
+//Time functions.
+//Ramp time: units/second (1000), units/min (*60000), units/hour (*3600000)
+tonr(BucketAxis0MC.tTimeRate);
+BucketAxis0MC.tTimeRate.PRE := abs(BucketAxis0MC.rSP-BucketAxis0MC.rPVInit)/BucketAxis0MC.rRate*60000;
+tonr(BucketAxis1MC.tTimeRate);
+BucketAxis1MC.tTimeRate.PRE := abs(BucketAxis1MC.rSP-BucketAxis1MC.rPVInit)/BucketAxis1MC.rRate*60000;
+//Discrete time between measurements
+tonr(BucketRefAxis.tTimeDerivative);
+BucketRefAxis.tTimeDerivative.PRE := BucketRefAxis.rTimeDerivative*1000;
+
+//Target generators
+//Linear
+//rTargetTimeFunction := (tTimeRamp.ACC/tTimeRamp.PRE);
+//rTargetGenerator := rPVInit+(rSP-rPVInit)*rTargetTimeFunction;
+//S-curve
+if ABS(BucketAxis0MC.rPV-BucketAxis1MC.rPV) > MixerBucket.rPosSkew then
+	BucketAxis0MC.rTargetTimeFunction := (((-2*((BucketAxis0MC.tTimeRate.ACC/BucketAxis0MC.tTimeRate.PRE)**3))+(3*((BucketAxis0MC.tTimeRate.ACC/BucketAxis0MC.tTimeRate.PRE)**2))));
+	BucketAxis1MC.rTargetTimeFunction := (((-2*((BucketAxis1MC.tTimeRate.ACC/BucketAxis1MC.tTimeRate.PRE)**3))+(3*((BucketAxis1MC.tTimeRate.ACC/BucketAxis1MC.tTimeRate.PRE)**2))));
+	BucketAxis0MC.rTargetGenerator := BucketAxis0MC.rPVInit+(BucketAxis0MC.rSP-BucketAxis0MC.rPVInit)*BucketAxis0MC.rTargetTimeFunction;
+	BucketAxis1MC.rTargetGenerator := BucketAxis1MC.rPVInit+(BucketAxis1MC.rSP-BucketAxis1MC.rPVInit)*BucketAxis1MC.rTargetTimeFunction;
+else
+	BucketRefAxis.rTargetTimeFunction := (((-2*((BucketAxis0MC.tTimeRate.ACC/BucketAxis0MC.tTimeRate.PRE)**3))+(3*((BucketAxis0MC.tTimeRate.ACC/BucketAxis0MC.tTimeRate.PRE)**2))));
+	BucketRefAxis.rTargetGenerator := BucketAxis0MC.rPVInit+(BucketAxis0MC.rSP-BucketAxis0MC.rPVInit)*BucketRefAxis.rTargetTimeFunction;
+	BucketAxis0MC.rTargetGenerator := BucketRefAxis.rTargetGenerator;
+	BucketAxis1MC.rTargetGenerator := BucketRefAxis.rTargetGenerator;
+end_if;
+
+//Error. This is calculated to a percent.
+BucketAxis0MC.rError[0] := (BucketAxis0MC.rTargetGenerator-BucketAxis0MC.rPV)/(BucketAxis0MC.rSP-BucketAxis0MC.rPVInit)*100;
+BucketAxis1MC.rError[0] := (BucketAxis1MC.rTargetGenerator-BucketAxis1MC.rPV)/(BucketAxis1MC.rSP-BucketAxis1MC.rPVInit)*100;
+	
+//Output control. 
+if BucketRefAxis.bEn and BucketAxis0MC.rSPInit = BucketAxis0MC.rSP and BucketAxis1MC.rSPInit = BucketAxis1MC.rSP then
+	BucketAxis0MC.tTimeRate.TimerEnable := 1;
+	BucketAxis0MC.tTimeRate.Reset := 0;
+	BucketAxis1MC.tTimeRate.TimerEnable := 1;
+	BucketAxis1MC.tTimeRate.Reset := 0;
+	if not BucketRefAxis.tTimeDerivative.DN then
+		BucketRefAxis.tTimeDerivative.TimerEnable := 1;
+		BucketRefAxis.tTimeDerivative.Reset := 0;
+	else
+		//Axis 0
+		//Log last scan's value (n)>(n-1)>(n-2)
+		BucketAxis0MC.rError[2] := BucketAxis0MC.rError[1];
+		BucketAxis0MC.rError[1] := BucketAxis0MC.rError[0];
+		BucketAxis0MC.rTarget[1] := BucketAxis0MC.rTarget[0];
+		BucketAxis0MC.rTarget[0] := BucketAxis0MC.rTargetGenerator;
+		BucketAxis0MC.rTargetVelocity[1] := BucketAxis0MC.rTargetVelocity[0];
+		BucketAxis0MC.rTargetAcceleration[1] := BucketAxis0MC.rTargetAcceleration[0];
+		BucketAxis0MC.rCVEMA[1] := BucketAxis0MC.rCVEMA[0];
+		//Velocity, acceleration, and jerk calculations (Discrete kenematics)
+		BucketAxis0MC.rTargetVelocity[0] := (BucketAxis0MC.rTarget[1]-BucketAxis0MC.rTarget[0])*1000/BucketAxis0MC.tTimeDerivative.PRE;
+		BucketAxis0MC.rTargetAcceleration[0] := (BucketAxis0MC.rTargetVelocity[1]-BucketAxis0MC.rTarget[0])*1000/BucketAxis0MC.tTimeDerivative.PRE;
+		BucketAxis0MC.rTargetJerk := (BucketAxis0MC.rTargetAcceleration[1]-BucketAxis0MC.rTargetAcceleration[0])*1000/BucketAxis0MC.tTimeDerivative.PRE;
+		//Proportional, integral, derivative, feedforward velocity&acceleration&jerk (PIDVAJ)
+		BucketAxis0MC.rPTerm := BucketAxis0MC.rPGain*(BucketAxis0MC.rError[0]-BucketAxis0MC.rError[1]);
+		BucketAxis0MC.rITerm := BucketAxis0MC.rIGain*BucketAxis0MC.rError[0]*BucketAxis0MC.rTimeDerivative;
+		BucketAxis0MC.rDTerm := BucketAxis0MC.rDGain*(BucketAxis0MC.rError[0]-2*BucketAxis0MC.rError[1]+BucketAxis0MC.rError[2])/BucketAxis0MC.rTimeDerivative**2;
+		BucketAxis0MC.rFFVTerm := BucketAxis0MC.rFFVGain*BucketAxis0MC.rTargetVelocity[0];
+		BucketAxis0MC.rFFATerm := BucketAxis0MC.rFFAGain*BucketAxis0MC.rTargetAcceleration[0];
+		BucketAxis0MC.rFFJTerm := BucketAxis0MC.rFFJGain*BucketAxis0MC.rTargetJerk;
+		BucketAxis0MC.rCV := BucketAxis0MC.rCV+BucketAxis0MC.rPTerm+BucketAxis0MC.rITerm+BucketAxis0MC.rDTerm+BucketAxis0MC.rFFVTerm+BucketAxis0MC.rFFATerm+BucketAxis0MC.rFFJTerm;
+		//Deadband offset
+		if BucketAxis0MC.rCV > 0 then
+			BucketAxis0MC.rCVDB := BucketAxis0MC.rCVPosStick+(BucketAxis0MC.rCV/BucketAxis0MC.rCVMax)*(BucketAxis0MC.rCVMax-BucketAxis0MC.rCVPosStick);
+		elsif BucketAxis0MC.rCV < 0 then
+			BucketAxis0MC.rCVDB := BucketAxis0MC.rCVNegStick+(BucketAxis0MC.rCV/BucketAxis0MC.rCVMin)*(BucketAxis0MC.rCVMin-BucketAxis0MC.rCVNegStick);
+		end_if;
+		//Min/max 
+		if BucketAxis0MC.rCVDB < BucketAxis0MC.rCVMin then
+			BucketAxis0MC.rCV := BucketAxis0MC.rCVMin + BucketAxis0MC.rCVNegStick;
+		elsif BucketAxis0MC.rCVDB >= BucketAxis0MC.rCVMax then
+			BucketAxis0MC.rCV := BucketAxis0MC.rCVMax - BucketAxis0MC.rCVPosStick;
+		end_if;
+		BucketAxis0MC.rCVEMA[0] := BucketAxis0MC.rCVAlpha*BucketAxis0MC.rCVDB+(1-BucketAxis0MC.rCVAlpha)*BucketAxis0MC.rCVEMA[1];
+		//Axis1
+		//Log last scan's value (n)>(n-1)>(n-2)
+		BucketAxis1MC.rError[2] := BucketAxis1MC.rError[1];
+		BucketAxis1MC.rError[1] := BucketAxis1MC.rError[0];
+		BucketAxis1MC.rTarget[1] := BucketAxis1MC.rTarget[0];
+		BucketAxis1MC.rTarget[0] := BucketAxis1MC.rTargetGenerator;
+		BucketAxis1MC.rTargetVelocity[1] := BucketAxis1MC.rTargetVelocity[0];
+		BucketAxis1MC.rTargetAcceleration[1] := BucketAxis1MC.rTargetAcceleration[0];
+		BucketAxis1MC.rCVEMA[1] := BucketAxis1MC.rCVEMA[0];
+		//Velocity, acceleration, and jerk calculations (Discrete kenematics)
+		BucketAxis1MC.rTargetVelocity[0] := (BucketAxis1MC.rTarget[1]-BucketAxis1MC.rTarget[0])*1000/BucketAxis1MC.tTimeDerivative.PRE;
+		BucketAxis1MC.rTargetAcceleration[0] := (BucketAxis1MC.rTargetVelocity[1]-BucketAxis1MC.rTarget[0])*1000/BucketAxis1MC.tTimeDerivative.PRE;
+		BucketAxis1MC.rTargetJerk := (BucketAxis1MC.rTargetAcceleration[1]-BucketAxis1MC.rTargetAcceleration[0])*1000/BucketAxis1MC.tTimeDerivative.PRE;
+		//Proportional, integral, derivative, feedforward velocity&acceleration&jerk (PIDVAJ)
+		BucketAxis1MC.rPTerm := BucketAxis1MC.rPGain*(BucketAxis1MC.rError[0]-BucketAxis1MC.rError[1]);
+		BucketAxis1MC.rITerm := BucketAxis1MC.rIGain*BucketAxis1MC.rError[0]*BucketAxis1MC.rTimeDerivative;
+		BucketAxis1MC.rDTerm := BucketAxis1MC.rDGain*(BucketAxis1MC.rError[0]-2*BucketAxis1MC.rError[1]+BucketAxis1MC.rError[2])/BucketAxis1MC.rTimeDerivative**2;
+		BucketAxis1MC.rFFVTerm := BucketAxis1MC.rFFVGain*BucketAxis1MC.rTargetVelocity[0];
+		BucketAxis1MC.rFFATerm := BucketAxis1MC.rFFAGain*BucketAxis1MC.rTargetAcceleration[0];
+		BucketAxis1MC.rFFJTerm := BucketAxis1MC.rFFJGain*BucketAxis1MC.rTargetJerk;
+		BucketAxis1MC.rCV := BucketAxis1MC.rCV+BucketAxis1MC.rPTerm+BucketAxis1MC.rITerm+BucketAxis1MC.rDTerm+BucketAxis1MC.rFFVTerm+BucketAxis1MC.rFFATerm+BucketAxis1MC.rFFJTerm;
+		//Deadband offset
+		if BucketAxis1MC.rCV > 0 then
+			BucketAxis1MC.rCVDB := BucketAxis1MC.rCVPosStick+(BucketAxis1MC.rCV/BucketAxis1MC.rCVMax)*(BucketAxis1MC.rCVMax-BucketAxis1MC.rCVPosStick);
+		elsif BucketAxis1MC.rCV < 0 then
+			BucketAxis1MC.rCVDB := BucketAxis1MC.rCVNegStick+(BucketAxis1MC.rCV/BucketAxis1MC.rCVMin)*(BucketAxis1MC.rCVMin-BucketAxis1MC.rCVNegStick);
+		end_if;
+		//Min/max 
+		if BucketAxis1MC.rCVDB < BucketAxis1MC.rCVMin then
+			BucketAxis1MC.rCV := BucketAxis1MC.rCVMin + BucketAxis1MC.rCVNegStick;
+		elsif BucketAxis1MC.rCVDB >= BucketAxis1MC.rCVMax then
+			BucketAxis1MC.rCV := BucketAxis1MC.rCVMax - BucketAxis1MC.rCVPosStick;
+		end_if;
+		//Output filter (first order exponential moving average) (Alpha = 1, no filter; Alpha = .01, very filtered;) 
+		BucketAxis1MC.rCVEMA[0] := BucketAxis1MC.rCVAlpha*BucketAxis1MC.rCVDB+(1-BucketAxis1MC.rCVAlpha)*BucketAxis1MC.rCVEMA[1];
+		//Reset time to trigger derivation delay
+		BucketRefAxis.tTimeDerivative.TimerEnable := 0;
+		BucketRefAxis.tTimeDerivative.Reset := 1;
+	end_if;
+else
+	//Set ouput to zero
+	BucketAxis0MC.rCV := 0;
+	BucketAxis0MC.rCVEMA[0] := 0;
+	BucketAxis1MC.rCV := 0;
+	BucketAxis1MC.rCVEMA[0] := 0;
+	//Log initial values for bumpless transfer. (n0)
+	BucketAxis0MC.rSPInit := BucketAxis0MC.rSP;
+	BucketAxis1MC.rSPInit := BucketAxis1MC.rSP;
+	BucketAxis0MC.rPVInit := BucketAxis0MC.rPV;
+	BucketAxis1MC.rPVInit := BucketAxis1MC.rPV;
+	//Turn off timers
+	BucketAxis0MC.tTimeRate.TimerEnable := 0;
+	BucketAxis0MC.tTimeRate.Reset := 1;
+	BucketAxis1MC.tTimeRate.TimerEnable := 0;
+	BucketAxis1MC.tTimeRate.Reset := 1;
+	BucketRefAxis.tTimeDerivative.TimerEnable := 0;
+	BucketRefAxis.tTimeDerivative.Reset := 1;
+end_if;
+
+//Tolerances.
+BucketAxis0MC.bAtSP := ABS((BucketAxis0MC.rPV-BucketAxis0MC.rSP)/BucketAxis0MC.rSP*100) <= BucketAxis0MC.rSPTol;
+BucketAxis0MC.bFollowingError := ABS(BucketAxis0MC.rError[0]) > BucketAxis0MC.rTargetTol and BucketAxis0MC.bEn;
+BucketAxis1MC.bAtSP := ABS((BucketAxis1MC.rPV-BucketAxis1MC.rSP)/BucketAxis1MC.rSP*100) <= BucketAxis1MC.rSPTol;
+BucketAxis1MC.bFollowingError := ABS(BucketAxis1MC.rError[0]) > BucketAxis1MC.rTargetTol and BucketAxis1MC.bEn;
