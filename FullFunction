@@ -1,0 +1,87 @@
+//Target generator and output control
+//This keeps the universe from collapse. (dx/0)
+if rRate = 0 then
+	rRate := .01;
+end_if;
+
+//Time functions.
+//Ramp time: units/second (1000), units/min (*60000), units/hour (*3600000)
+tonr(tTimeRate);
+tTimeRate.PRE := abs(rSP-rPVInit)/rRate*1000;
+//Discrete time between measurements
+tonr(tTimeDerivative);
+tTimeDerivative.PRE := rTimeDerivative*1000;
+
+//Target generators
+//Linear
+//rTargetTimeFunction := (tTimeRamp.ACC/tTimeRamp.PRE);
+//rTargetGenerator := rPVInit+(rSP-rPVInit)*rTargetTimeFunction;
+//S-curve
+rTargetTimeFunction := (((-2*((tTimeRate.ACC/tTimeRate.PRE)**3))+(3*((tTimeRate.ACC/tTimeRate.PRE)**2))));
+rTargetGenerator := rPVInit+(rSP-rPVInit)*rTargetTimeFunction;
+
+//Error. This is calculated to a percent.
+rError[0] := (rTargetGenerator-rPV)/(rSP-rPVInit)*100;
+
+//Output control. 
+if bEn and rSPInit = rSP then
+	tTimeRate.TimerEnable := 1;
+	tTimeRate.Reset := 0;
+	if not tTimeDerivative.DN then
+		tTimeDerivative.TimerEnable := 1;
+		tTimeDerivative.Reset := 0;
+	else
+		//Log last scan's value (n)->(n-1)->(n-2)
+		rError[2] := rError[1];
+		rError[1] := rError[0];
+		rTarget[1] := rTarget[0];
+		rTarget[0] := rTargetGenerator;
+		rTargetVelocity[1] := rTargetVelocity[0];
+		rTargetAcceleration[1] := rTargetAcceleration[0];
+		rCVEMA[1] := rCVEMA[0];
+		//Velocity, acceleration, and jerk calculation 
+		rTargetVelocity[0] := (rTarget[1]-rTarget[0])*1000/tTimeDerivative.PRE;
+		rTargetAcceleration[0] := (rTargetVelocity[1]-rTarget[0])*1000/tTimeDerivative.PRE;
+		rTargetJerk := (rTargetAcceleration[1]-rTargetAcceleration[0])*1000/tTimeDerivative.PRE;
+		//Proportional, integral, derivative, feedforward velocity&acceleration&jerk (PIDVAJ)
+		rPTerm := rPGain*(rError[0]-rError[1]);
+		rITerm := rIGain*rError[0]*rTimeDerivative;
+		rDTerm := rDGain*(rError[0]-2*rError[1]+rError[2])/rTimeDerivative**2;
+		rFFVTerm := rFFVGain*rTargetVelocity[0];
+		rFFATerm := rFFAGain*rTargetAcceleration[0];
+		rFFJTerm := rFFJGain*rTargetJerk;
+		rCV := rCV+rPTerm+rITerm+rDTerm+rFFVTerm+rFFATerm+rFFJTerm;
+		//Deadband offset
+		if rCV > 0 then
+			rCVDB := rCVPosStick+(rCV/rCVMax)*(rCVMax-rCVPosStick);
+		elsif rCV < 0 then`
+			rCVDB := rCVNegStick+(rCV/rCVMin)*(rCVMin-rCVNegStick);
+		end_if;
+		//Min/max
+		if rCV < rCVMin then
+			rCV := rCVMin;
+		elsif rCV >= rCVMax then
+			rCV := rCVMax;
+		end_if;
+		//Output filter (first order exponential moving average) (Alpha = 1, no filter; Alpha = .01, very filtered;) 
+		rCVEMA[0] := rCVAlpha*rCV+(1-rCVAlpha)*rCVEMA[1];
+		tTimeDerivative.TimerEnable := 0;
+		tTimeDerivative.Reset := 1;
+	end_if;
+else
+	//Set ouput to zero
+	rCV := 0;
+	rCVEMA[0] := 0;
+	//Log initial values for bumpless transfer. (n0)
+	rSPInit := rSP;
+	rPVInit := rPV;
+	//Turn off timers
+	tTimeRate.TimerEnable := 0;
+	tTimeRate.Reset := 1;
+	tTimeDerivative.TimerEnable := 0;
+	tTimeDerivative.Reset := 1;
+end_if;
+
+//Tolerances.
+bAtSP := ABS((rPV-rSP)/rSP*100) <= rSPTol;
+bFollowingError := ABS(rError[0]) > rTargetTol and bEn;
